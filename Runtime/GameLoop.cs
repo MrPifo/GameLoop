@@ -1,16 +1,14 @@
 using Cysharp.Threading.Tasks;
-using Sperlich.PauseManager;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
-using UnityEngine.Events;
 
 namespace Sperlich.GameLoop {
-	public class GameLoop : IPausable {
+	public class GameLoop {
+
+		public const float TickSpeed = 0.05f;
 		public bool IsPaused { get; set; } = false;
-		public UnityEvent OnPauseEvent { get; set; } = new();
-		public UnityEvent OnResumeEvent { get; set; } = new();
 		public CancellationTokenSource CancelToken { get; private set; } = new();
 		public Dictionary<GameCycle, List<IEntityLoop>> ActiveLoops { get; private set; } = new();
 
@@ -30,21 +28,11 @@ namespace Sperlich.GameLoop {
 				ActiveLoops.Add(l, new());
 			}
 
-			// Initialize update cycles with a unified approach
-			InitializeCycle(GameCycle.Update, PlayerLoopTiming.Update,
-				(entity, delta) => entity.OnUpdate(delta), () => Time.deltaTime);
-
-			InitializeCycle(GameCycle.LateUpdate, PlayerLoopTiming.PostLateUpdate,
-				(entity, delta) => entity.OnLateUpdate(delta), () => Time.deltaTime);
-
-			InitializeCycle(GameCycle.Fixed, PlayerLoopTiming.FixedUpdate,
-				(entity, delta) => entity.OnFixed(delta), () => Time.fixedDeltaTime);
-
-			InitializeCycle(GameCycle.LateFixedUpdate, PlayerLoopTiming.LastFixedUpdate,
-				(entity, delta) => entity.OnLateFixedUpdate(delta), () => Time.fixedDeltaTime);
-
-			// Initialize tick cycle with custom timing
-			InitializeTickCycle(0.05f, () => 0.05f);
+			InitializeCycle(GameCycle.Update, PlayerLoopTiming.Update, (entity, delta) => entity.OnUpdate(delta), () => Time.deltaTime);
+			InitializeCycle(GameCycle.LateUpdate, PlayerLoopTiming.PostLateUpdate, (entity, delta) => entity.OnLateUpdate(delta), () => Time.deltaTime);
+			InitializeCycle(GameCycle.Fixed, PlayerLoopTiming.FixedUpdate, (entity, delta) => entity.OnFixed(delta), () => Time.fixedDeltaTime);
+			InitializeCycle(GameCycle.LateFixedUpdate, PlayerLoopTiming.LastFixedUpdate, (entity, delta) => entity.OnLateFixedUpdate(delta), () => Time.fixedDeltaTime);
+			InitializeTickCycle(TickSpeed, () => TickSpeed);
 		}
 
 		private void InitializeCycle(GameCycle cycle, PlayerLoopTiming timing, Action<IEntityLoop, float> updateAction, Func<float> deltaTimeProvider) {
@@ -118,15 +106,14 @@ namespace Sperlich.GameLoop {
 			}).AttachExternalCancellation(CancelToken.Token);
 		}
 
-		public void OnPause() => IsPaused = true;
-		public void OnResume() => IsPaused = false;
+		public void Pause() => IsPaused = true;
+		public void Resume() => IsPaused = false;
 
 		public LoopAction AddListener(Action<float> action, GameCycle cycle, bool autoAddToCycle = true) {
 			var loopAction = new LoopAction(cycle, action, autoAddToCycle);
 			AddToCycle(loopAction);
 			return loopAction;
 		}
-
 		public void RemoveListener(LoopAction action) => action.RemoveFromCycle();
 
 		public void AddToCycle(IEntityLoop entity) {
@@ -153,17 +140,17 @@ namespace Sperlich.GameLoop {
 
 		public void Reset() {
 			CancelToken.Cancel();
-			OnPauseEvent = new();
-			OnResumeEvent = new();
 			CancelToken = new CancellationTokenSource();
 
 			foreach (var l in ActiveLoops) {
 				l.Value.Clear();
 			}
 
-			// Reinitialize loops after reset
-			// This is missing in the original implementation
-			// Consider adding loop reinitialization here
+			InitializeCycle(GameCycle.Update, PlayerLoopTiming.Update, (entity, delta) => entity.OnUpdate(delta), () => Time.deltaTime);
+			InitializeCycle(GameCycle.LateUpdate, PlayerLoopTiming.PostLateUpdate, (entity, delta) => entity.OnLateUpdate(delta), () => Time.deltaTime);
+			InitializeCycle(GameCycle.Fixed, PlayerLoopTiming.FixedUpdate, (entity, delta) => entity.OnFixed(delta), () => Time.fixedDeltaTime);
+			InitializeCycle(GameCycle.LateFixedUpdate, PlayerLoopTiming.LastFixedUpdate, (entity, delta) => entity.OnLateFixedUpdate(delta), () => Time.fixedDeltaTime);
+			InitializeTickCycle(TickSpeed, () => TickSpeed);
 		}
 	}
 }

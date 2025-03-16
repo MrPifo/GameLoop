@@ -2,8 +2,7 @@
     "name": "Sperlich.GameLoop",
     "rootNamespace": "GameLoop",
     "references": [
-        "GUID:f51ebe6a0ceec4240a699833d6309b23",
-        "GUID:bad4f84ece48fcc46979307aa13af1e1"
+        "GUID:f51ebe6a0ceec4240a699833d6309b23"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
