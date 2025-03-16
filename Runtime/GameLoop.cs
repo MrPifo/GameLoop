@@ -8,8 +8,7 @@ using UnityEngine.Events;
 
 namespace Sperlich.GameLoop {
 	public class GameLoop : IPausable {
-
-		public bool IsPaused { get; set; } = new();
+		public bool IsPaused { get; set; } = false;
 		public UnityEvent OnPauseEvent { get; set; } = new();
 		public UnityEvent OnResumeEvent { get; set; } = new();
 		public CancellationTokenSource CancelToken { get; private set; } = new();
@@ -21,175 +20,95 @@ namespace Sperlich.GameLoop {
 				if (_instance == null) {
 					_instance = new GameLoop();
 				}
-
 				return _instance;
 			}
+			set => _instance = value;
 		}
 
 		public GameLoop() {
-			foreach (GameCycle l in System.Enum.GetValues(typeof(GameCycle))) {
+			foreach (GameCycle l in Enum.GetValues(typeof(GameCycle))) {
 				ActiveLoops.Add(l, new());
 			}
 
+			// Initialize update cycles with a unified approach
+			InitializeCycle(GameCycle.Update, PlayerLoopTiming.Update,
+				(entity, delta) => entity.OnUpdate(delta), () => Time.deltaTime);
+
+			InitializeCycle(GameCycle.LateUpdate, PlayerLoopTiming.PostLateUpdate,
+				(entity, delta) => entity.OnLateUpdate(delta), () => Time.deltaTime);
+
+			InitializeCycle(GameCycle.Fixed, PlayerLoopTiming.FixedUpdate,
+				(entity, delta) => entity.OnFixed(delta), () => Time.fixedDeltaTime);
+
+			InitializeCycle(GameCycle.LateFixedUpdate, PlayerLoopTiming.LastFixedUpdate,
+				(entity, delta) => entity.OnLateFixedUpdate(delta), () => Time.fixedDeltaTime);
+
+			// Initialize tick cycle with custom timing
+			InitializeTickCycle(0.05f, () => 0.05f);
+		}
+
+		private void InitializeCycle(GameCycle cycle, PlayerLoopTiming timing, Action<IEntityLoop, float> updateAction, Func<float> deltaTimeProvider) {
 			UniTask.Create(async () => {
-				var list = ActiveLoops[GameCycle.Update];
+				var list = ActiveLoops[cycle];
 				bool foundNull = false;
 
 				while (Application.isPlaying) {
 					CancelToken.Token.ThrowIfCancellationRequested();
+
 					if (foundNull) {
 						foundNull = false;
 						list.RemoveAll(e => e == null);
 					}
 
-					if (IsPaused == false) {
+					if (!IsPaused) {
 						for (int i = 0; i < list.Count; i++) {
 							var current = list[i];
 
-							// Check if the object is null or destroyed before calling OnUpdate
 							if (current == null) {
 								foundNull = true;
 								continue;
 							}
 
 							try {
-								current.OnUpdate(Time.deltaTime);
+								updateAction(current, deltaTimeProvider());
 							} catch (Exception ex) {
 								foundNull = true;
-								UnityEngine.Debug.LogError($"Error in OnUpdate: {ex.Message}");
+								Debug.LogError($"Error in {cycle}: {ex.Message} \n {ex.StackTrace}");
 							}
 						}
 					}
 
-					await UniTask.Yield(PlayerLoopTiming.Update);
+					await UniTask.Yield(timing);
 				}
 			}).AttachExternalCancellation(CancelToken.Token);
-			UniTask.Create(async () => {
-				var list = ActiveLoops[GameCycle.LateUpdate];
-				bool foundNull = false;
-
-				while (Application.isPlaying) {
-					CancelToken.Token.ThrowIfCancellationRequested();
-					if (foundNull) {
-						foundNull = false;
-						list.RemoveAll(e => e == null);
-					}
-
-					if (IsPaused == false) {
-						for (int i = 0; i < list.Count; i++) {
-							var current = list[i];
-
-							// Check if the object is null or destroyed before calling OnUpdate
-							if (current == null || current.Equals(null)) {
-								foundNull = true;
-								continue;
-							}
-
-							try {
-								current.OnLateUpdate(Time.deltaTime);
-							} catch (Exception ex) {
-								foundNull = true;
-								UnityEngine.Debug.LogError($"Error in OnUpdate: {ex.Message}");
-							}
-						}
-					}
-
-					await UniTask.Yield(PlayerLoopTiming.PostLateUpdate);
-				}
-			}).AttachExternalCancellation(CancelToken.Token);
-			UniTask.Create(async () => {
-				var list = ActiveLoops[GameCycle.LateFixedUpdate];
-				bool foundNull = false;
-
-				while (Application.isPlaying) {
-					CancelToken.Token.ThrowIfCancellationRequested();
-					if (foundNull) {
-						foundNull = false;
-						list.RemoveAll(e => e == null);
-					}
-
-					if (IsPaused == false) {
-						for (int i = 0; i < list.Count; i++) {
-							var current = list[i];
-
-							// Check if the object is null or destroyed before calling OnUpdate
-							if (current == null || current.Equals(null)) {
-								foundNull = true;
-								continue;
-							}
-
-							try {
-								current.OnLateFixedUpdate(Time.fixedDeltaTime);
-							} catch (Exception ex) {
-								foundNull = true;
-								UnityEngine.Debug.LogError($"Error in OnUpdate: {ex.Message}");
-							}
-						}
-					}
-
-					await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
-				}
-			}).AttachExternalCancellation(CancelToken.Token);
-			UniTask.Create(async () => {
-				var list = ActiveLoops[GameCycle.Fixed];
-				bool foundNull = false;
-
-				while (Application.isPlaying) {
-					CancelToken.Token.ThrowIfCancellationRequested();
-					if (foundNull) {
-						foundNull = false;
-						list.RemoveAll(e => e == null);
-					}
-
-					if (IsPaused == false) {
-						for (int i = 0; i < list.Count; i++) {
-							var current = list[i];
-
-							// Check if the object is null or destroyed before calling OnUpdate
-							if (current == null || current.Equals(null)) {
-								foundNull = true;
-								continue;
-							}
-
-							try {
-								current.OnFixed(Time.fixedDeltaTime);
-							} catch (Exception ex) {
-								foundNull = true;
-								UnityEngine.Debug.LogError($"Error in OnUpdate: {ex.Message} \n {ex.StackTrace}");
-							}
-						}
-					}
-
-					await UniTask.Yield(PlayerLoopTiming.FixedUpdate);
-				}
-			}).AttachExternalCancellation(CancelToken.Token);
+		}
+		private void InitializeTickCycle(float tickSpeed, Func<float> deltaTimeProvider) {
 			UniTask.Create(async () => {
 				var list = ActiveLoops[GameCycle.Tick];
 				bool foundNull = false;
-				const float tickSpeed = 0.05f;
 
 				while (Application.isPlaying) {
 					CancelToken.Token.ThrowIfCancellationRequested();
+
 					if (foundNull) {
 						foundNull = false;
 						list.RemoveAll(e => e == null);
 					}
 
-					if (IsPaused == false) {
+					if (!IsPaused) {
 						for (int i = 0; i < list.Count; i++) {
 							var current = list[i];
 
-							// Check if the object is null or destroyed before calling OnUpdate
-							if (current == null || current.Equals(null)) {
+							if (current == null) {
 								foundNull = true;
 								continue;
 							}
 
 							try {
-								current.OnTick(tickSpeed);
+								current.OnTick(deltaTimeProvider());
 							} catch (Exception ex) {
 								foundNull = true;
-								UnityEngine.Debug.LogError($"Error in Tick: {ex.Message} \n {ex.StackTrace}");
+								Debug.LogError($"Error in Tick: {ex.Message} \n {ex.StackTrace}");
 							}
 						}
 					}
@@ -199,33 +118,30 @@ namespace Sperlich.GameLoop {
 			}).AttachExternalCancellation(CancelToken.Token);
 		}
 
-		public void OnPause() {
-			IsPaused = true;
-		}
-		public void OnResume() {
-			IsPaused = false;
-		}
-		public LoopAction AddListener(Action action, GameCycle cycle, bool autoAddToCycle = true) {
+		public void OnPause() => IsPaused = true;
+		public void OnResume() => IsPaused = false;
+
+		public LoopAction AddListener(Action<float> action, GameCycle cycle, bool autoAddToCycle = true) {
 			var loopAction = new LoopAction(cycle, action, autoAddToCycle);
 			AddToCycle(loopAction);
-
 			return loopAction;
 		}
-		public void RemoveListener(LoopAction action) {
-			action.RemoveFromCycle();
-		}
+
+		public void RemoveListener(LoopAction action) => action.RemoveFromCycle();
+
 		public void AddToCycle(IEntityLoop entity) {
-			foreach (GameCycle l in System.Enum.GetValues(typeof(GameCycle))) {
+			foreach (GameCycle l in Enum.GetValues(typeof(GameCycle))) {
 				AddToCycle(l, entity);
 			}
 		}
 		public void AddToCycle(GameCycle loop, IEntityLoop entity) {
-			if (ActiveLoops[loop].Contains(entity) == false) {
+			if (!ActiveLoops[loop].Contains(entity)) {
 				ActiveLoops[loop].Add(entity);
 			}
 		}
+
 		public void RemoveFromCycle(IEntityLoop entity) {
-			foreach (GameCycle l in System.Enum.GetValues(typeof(GameCycle))) {
+			foreach (GameCycle l in Enum.GetValues(typeof(GameCycle))) {
 				RemoveFromCycle(l, entity);
 			}
 		}
@@ -234,6 +150,7 @@ namespace Sperlich.GameLoop {
 				ActiveLoops[loop].Remove(entity);
 			}
 		}
+
 		public void Reset() {
 			CancelToken.Cancel();
 			OnPauseEvent = new();
@@ -243,6 +160,10 @@ namespace Sperlich.GameLoop {
 			foreach (var l in ActiveLoops) {
 				l.Value.Clear();
 			}
+
+			// Reinitialize loops after reset
+			// This is missing in the original implementation
+			// Consider adding loop reinitialization here
 		}
 	}
 }

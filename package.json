@@ -1,7 +1,7 @@
 {
   "name": "com.sperlich.gameloop",
   "displayName": "GameLoop",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "This packages allows to create ever running loops and provides an interface to subscribe to that loop",
   "unity": "2022.3",
   "unityRelease": "37f1",
